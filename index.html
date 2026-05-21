@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gamified Investment Platform</title>
+  <link rel="stylesheet" href="marketsim.css">
+  <!--
+    Script loading order matters:
+      1. Chart.js (vendor) must load first.
+      2. Data files (assets-data, news-data, tutorial-data) define the globals
+         (ASSETS, newsDatabase, tutSteps, etc.) that marketsim.js reads.
+      3. marketsim.js is the engine.
+
+    `defer` is REQUIRED on marketsim.js because it has top-level DOM access
+    (e.g. `new Chart(document.getElementById('allocationChart'), ...)`).
+    Without defer, the script runs before the <body> is parsed and the
+    canvas lookup returns null — that breaks the diversification donut and
+    cascades into other features (breaking news, etc.).
+    `defer` keeps execution order: chart.js → data files → marketsim.js,
+    all after the DOM is ready.
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="assets-data.js" defer></script>
+  <script src="news-data.js" defer></script>
+  <script src="tutorial-data.js" defer></script>
+  <script src="marketsim.js" defer></script>
+
+
+  <style>
+    html{height:100%}
+    :root{--primary:#2c3e50;--accent:#3498db;--success:#27ae60;--danger:#e74c3c;--gold:#f1c40f;--bg:#e9edf3;--modal-bg:rgba(0,0,0,0.85)}
+    body{font-family:'Segoe UI',Tahoma,sans-serif;background:var(--bg);margin:0;padding:0;color:#333;height:100vh;overflow:hidden;font-size:clamp(11px,0.9vw,14px)}
+    .container{width:100%;height:100vh;display:grid;grid-template-rows:auto 1fr;grid-template-columns:1fr 2fr;gap:5px;padding:clamp(4px,0.5vw,8px);box-sizing:border-box}
+    .panel{background:#fff;padding:clamp(5px,0.5vw,8px) clamp(8px,0.7vw,12px);border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:3px;position:relative;box-sizing:border-box}
+    .panel-title{margin:0 0 3px 0;font-size:clamp(10px,0.9vw,12px);padding-bottom:3px;border-bottom:1px solid #eee}
+    header{grid-column:1/-1;display:flex;justify-content:space-between;background:#2c3e50;color:#fff;padding:clamp(5px,0.5vw,8px) clamp(10px,1vw,16px);border-radius:8px;align-items:center;box-sizing:border-box;flex-wrap:wrap;gap:4px}
+    header .stat-value{color:#fff;font-size:clamp(13px,1.3vw,18px)} header .stat-label{color:rgba(255,255,255,0.6)}
+    nav{grid-column:1/2;grid-row:2/3;display:flex;flex-direction:column;overflow:hidden;gap:3px}
+    main{grid-column:2/3;grid-row:2/3;display:flex;flex-direction:column;overflow:hidden}
+    .stat-box{text-align:right;margin-left:clamp(6px,1vw,18px)}
+    .stat-label{font-size:clamp(8px,0.7vw,10px);text-transform:uppercase;letter-spacing:1px;color:#888}
+    .stat-value{font-size:clamp(13px,1.3vw,18px);font-weight:800;color:var(--primary)}
+    .market-grid{height:100%;overflow-y:auto;padding-right:3px}
+    .asset-card{border:1px solid #e1e4e8;border-radius:8px;padding:clamp(8px,0.8vw,14px);background:#fff;transition:transform 0.2s,box-shadow 0.2s,border-color 0.2s;font-size:clamp(12px,1vw,15px);cursor:pointer;overflow:visible}
+    .asset-card:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 4px 10px rgba(0,0,0,0.06)}
+    .asset-card--selected{border:2px solid var(--accent);box-shadow:0 0 0 3px rgba(52,152,219,0.18),0 6px 14px rgba(52,152,219,0.18);background:#f5fafe}
+    .asset-card--selected:hover{transform:translateY(-2px);border-color:var(--accent)}
+    /* Asset name = primary clickable CTA: dotted underline + ▸ on hover + tooltip */
+    .asset-card__name--clickable{position:relative;cursor:pointer;display:inline-block;font-weight:700;font-size:clamp(13px,1.05vw,16px);border-bottom:1px dashed #b0b9c2;padding-bottom:1px;transition:color 0.15s,border-color 0.15s}
+    .asset-card__name--clickable::after{content:"▸";opacity:0;margin-left:4px;color:var(--accent);transition:opacity 0.15s,transform 0.15s;display:inline-block}
+    .asset-card__name--clickable:hover{color:var(--accent);border-bottom-color:var(--accent);border-bottom-style:solid}
+    .asset-card__name--clickable:hover::after{opacity:1;transform:translateX(2px)}
+    .asset-card__name--clickable:hover::before{content:"Click for more";position:absolute;left:0;top:calc(100% + 6px);background:#2c3e50;color:#fff;padding:4px 8px;border-radius:4px;font-size:10px;font-weight:600;white-space:nowrap;z-index:50;box-shadow:0 2px 6px rgba(0,0,0,0.2);pointer-events:none}
+    /* Sector tag = informational badge (NOT clickable), restored brand colors */
+    .tag{font-size:clamp(9px,0.75vw,11px);font-weight:bold;padding:3px 7px;border-radius:4px;color:#fff;display:inline-block;text-transform:uppercase;letter-spacing:0.5px}
+    .tag--static{cursor:default}
+    .tag-technology{background:#3498db}.tag-healthcare{background:#e74c3c}.tag-energy{background:#9b59b6}
+    .tag-foodandbeverage{background:#1abc9c}.tag-govt{background:#2c3e50}.tag-realestate{background:#0B6623}.tag-global{background:#34495e}
+    .button{cursor:pointer;border:none;border-radius:4px;font-weight:600;transition:0.2s}
+    .btn-buy{background:#d8f0e1;color:#27ae60;flex:1 1 0;min-width:0;padding:clamp(6px,0.7vw,10px) clamp(8px,1vw,14px);font-size:clamp(11px,0.95vw,14px);border-radius:8px;font-weight:700;letter-spacing:0.3px;border:none;box-shadow:0 1px 2px rgba(0,0,0,0.05);cursor:pointer;transition:0.2s}
+    .btn-buy:hover{background:#27ae60;color:#fff;transform:translateY(-1px);box-shadow:0 4px 10px rgba(39,174,96,0.35)}
+    .btn-buy:active{transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,0.1)}
+    .btn-sell{background:#fde2e0;color:#c0392b;flex:1 1 0;min-width:0;padding:clamp(6px,0.7vw,10px) clamp(8px,1vw,14px);font-size:clamp(11px,0.95vw,14px);border-radius:8px;font-weight:700;letter-spacing:0.3px;border:none;box-shadow:0 1px 2px rgba(0,0,0,0.05);cursor:pointer;transition:0.2s}
+    .btn-sell:hover{background:#c0392b;color:#fff;transform:translateY(-1px);box-shadow:0 4px 10px rgba(192,57,43,0.35)}
+    .btn-sell:active{transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,0.1)}
+    .btn-advance{background:#27ae60;color:#fff;width:100%;padding:12px;font-size:14px;font-weight:700;border:none;border-radius:8px;cursor:pointer;transition:0.2s;letter-spacing:0.5px}
+    .btn-advance:hover{background:#219a52}.btn-advance:disabled{background:#95a5a6;cursor:not-allowed}
+    .btn-tut{background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.3);padding:4px 12px;font-size:11px;color:rgba(255,255,255,0.85);margin-left:10px;border-radius:20px}
+    .btn-tut:hover{background:rgba(255,255,255,0.25);color:#fff}
+    .btn-tf{background:#eee;border:1px solid #ddd;padding:4px 10px;font-size:11px;border-radius:4px;margin-left:4px}
+    .tut-overlay{z-index:3000; display:none;position:fixed;inset:0;pointer-events:auto}
+    .tut-dim{z-index:0;position:absolute;inset:0;background:rgba(0,0,0,0.55);pointer-events:auto}
+    .tut-box{z-index:6000;position:fixed;background:#fff;padding:18px;width:300px;max-height:80vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.4);border-radius:10px;pointer-events:auto}
+    .tut-highlight{z-index:7000 !important;position:relative;box-shadow:0 0 0 4px #f1c40f,0 0 20px rgba(241,196,15,0.5) !important;border-radius:10px}
+    .modal-overlay{z-index:9000; display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:var(--modal-bg);justify-content:center;align-items:center}
+    .modal-box{background:#fff;padding:24px;border-radius:12px;max-width:600px;width:90%;position:relative;box-shadow:0 10px 25px rgba(0,0,0,0.5);text-align:center}
+    .close-btn{position:absolute;top:10px;right:16px;font-size:22px;cursor:pointer;color:#999}
+    .shock-btn{padding:10px 24px;font-size:14px;border-radius:30px;border:none;cursor:pointer;color:#fff}
+    .div-meter-bg{background:#eee;height:8px;border-radius:4px;margin-top:5px;overflow:hidden}
+    .div-meter-fill{height:100%;width:0%;transition:width 0.5s,background-color 0.5s}
+    .news-item-clickable{cursor:pointer;padding:4px 5px;border-radius:3px;transition:0.15s;font-size:12px;border-bottom:1px solid #f0f0f0}
+    .news-item-clickable:hover{background:rgba(52,152,219,0.1);color:#2980b9}
+    .holdings-bar{cursor:pointer;padding:8px 10px;border-radius:6px;background:#f8f9fb;border:1px solid #e8ecf1;transition:0.2s;display:flex;justify-content:space-between;align-items:center;font-size:12px}
+    .holdings-bar:hover{background:#eef2f7;border-color:#c8ddf0}
+    .holdings-bar__count{font-weight:700;color:var(--primary);font-size:13px}
+    .holdings-bar__value{color:#27ae60;font-weight:700;font-size:13px}
+    .holdings-bar__arrow{color:#aaa;font-size:16px}
+  </style>
+</head>
+<body>
+  <div id="tutOverlay" class="tut-overlay">
+    <div class="tut-dim" onclick="endTutorial()"></div>
+    <div id="tutBox" class="tut-box">
+      <span id="tutCounter" style="font-size:10px;color:#aaa;float:right;"></span>
+      <span class="close-btn" onclick="endTutorial()" style="position:absolute;top:6px;right:12px;">&times;</span>
+      <h3 id="tutTitle" style="margin:0 0 8px 0;font-size:16px;"></h3>
+      <p id="tutText" style="font-size:13px;line-height:1.5;color:#555;margin:0;"></p>
+      <p id="tutHint" style="font-size:12px;display:none;margin:6px 0 0;"></p>
+      
+      <div class="tut-actions">
+        <button id="tutPrevBtn" class="tut-btn tut-btn--secondary" onclick="prevTutorial()">&larr; Back</button>
+        <button id="tutNextBtn" class="tut-btn tut-btn--primary tut-next--enabled" onclick="nextTutorial()">Next &#x2192;</button>
+      </div>
+
+    </div>
+  </div>
+  <div id="shockModal" class="modal-overlay"><div class="modal-box"><div style="font-size:48px;margin-bottom:8px;">&#128201;</div><h2 id="shockTitle" style="font-size:24px;margin-bottom:8px;">Market Event!</h2><p id="shockBody" style="font-size:14px;"></p><button class="shock-btn" onclick="closeShockModal()" style="background:var(--primary);margin-top:8px;">Continue</button></div></div>
+  <div id="eduModal" class="modal-overlay"><div class="modal-box edu-modal-box"><span class="close-btn" onclick="closeEduModal()">&times;</span><h3 id="modalTitle" class="edu-modal__title"></h3><div class="edu-modal__about-label">About</div><p id="modalDesc" class="edu-modal__desc"></p><div class="edu-modal__divider"></div><div class="edu-modal__tf-row"><button class="btn-tf" data-tf="D" onclick="updateDetailTimeframe('D')">Day</button><button class="btn-tf" data-tf="M" onclick="updateDetailTimeframe('M')">Month</button><button class="btn-tf" data-tf="Y" onclick="updateDetailTimeframe('Y')">Year</button></div><div class="edu-modal__chart"><canvas id="detailChart"></canvas></div></div></div>
+  <div id="newsArticleModal" class="modal-overlay"><div class="modal-box" style="max-width:550px;text-align:left;padding:0;overflow:hidden;"><span class="close-btn" onclick="toggleModal('newsArticleModal',false)" style="z-index:1;color:#666;">&times;</span><div id="newsArticleImageContainer" style="width:100%;max-height:200px;overflow:hidden;background:#f5f5f5;"><img id="newsArticleImage" src="" alt="News" style="width:100%;display:block;" onerror="this.style.display='none'"></div><div style="padding:16px 20px;"><h3 id="newsArticleTitle" style="font-size:16px;margin:0 0 8px 0;color:#1a1a1a;font-family:Georgia,serif;"></h3><p id="newsArticleBody" style="font-size:13px;color:#555;line-height:1.6;margin:0;"></p></div></div></div>
+  
+  <!-- Participant ID screen -->
+<div id="participantScreen" class="participant-screen">
+  <div class="participant-screen__card"> <h1 class="participant-screen__title">Welcome to Investify</h1> <p class="participant-screen__text"> Please enter your participant ID to begin the simulation.</p>
+    <input id="participantIdInput" type="text" placeholder="Participant ID" class="participant-screen__input"/>
+    <button id="participantStartBtn" class="btn-advance participant-screen__btn">Start Simulation</button>
+    <p id="participantError" class="participant-screen__error">Please enter a valid participant ID.</p>
+    <p class="participant-screen__note">Your participant ID will be recorded with your final result.</p>
+  </div>
+</div>
+
+  <!-- Past News Modal -->
+  <div id="pastNewsModal" class="modal-overlay"><div class="modal-box" style="max-width:600px;text-align:left;"><span class="close-btn" onclick="toggleModal('pastNewsModal',false)">&times;</span><h2 style="color:var(--primary);margin:0 0 12px 0;font-size:20px;">📰 Past News Archive</h2><div id="past-news-content" style="max-height:500px;overflow-y:auto;font-size:13px;"></div></div></div>
+  <!-- Holdings Modal -->
+  <div id="holdingsModal" class="modal-overlay"><div class="modal-box" style="max-width:600px;text-align:left;"><span class="close-btn" onclick="toggleModal('holdingsModal',false)">&times;</span><h2 style="color:var(--primary);margin:0 0 12px 0;font-size:20px;">📋 My Holdings</h2><div id="holdings-modal-content" style="max-height:500px;overflow-y:auto;font-size:14px;"></div></div></div>
+  <!-- Breaking News Modal -->
+  <div id="breakingModal" class="modal-overlay" style="z-index:5500;">
+    <div class="modal-box" style="max-width:650px;text-align:left;padding:0;overflow:hidden;">
+      <div style="background:#1a1a1a;color:#fff;padding:8px 20px;font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;display:flex;justify-content:space-between;">
+        <span>⚡ Breaking News</span>
+        <span id="breakingYear" style="color:#e74c3c;">Year 0</span>
+      </div>
+      <div style="border-bottom:3px double #1a1a1a;"></div>
+      <div style="padding:20px 24px;">
+        <h2 id="breakingHeadline" style="font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:900;line-height:1.25;color:#1a1a1a;margin:0 0 10px 0;"></h2>
+        <p id="breakingSubtext" style="font-size:13px;color:#555;line-height:1.5;margin:0 0 16px 0;font-style:italic;"></p>
+        <button class="shock-btn" onclick="closeBreakingNews()" style="background:#1a1a1a;width:100%;font-size:13px;">Continue</button>
+      </div>
+    </div>
+  </div>
+  <div id="gameOverModal" class="modal-overlay"><div class="modal-box" style="max-width:550px;"><h2 style="color:var(--primary);margin-top:0;">&#127942; Game Over</h2><p style="font-size:18px;">Your final net worth: <b id="finalNetWorth" style="color:var(--primary);font-size:22px;">$0</b></p><h3> Score: <span id="finalPrudenceScore" style="font-size:28px;">0</span>/100</h3><p id="finalPrudenceGrade" style="font-size:14px;"></p><div style="display:flex;flex-direction:column;gap:4px;text-align:left;margin-bottom:12px;"><div style="display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding-bottom:4px;"><span style="color:#555;">Emotional Discipline:</span><b id="breakdownDiscipline">0/100</b></div><div style="display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding-bottom:4px;"><span style="color:#555;">Diversity Consistency:</span><b id="breakdownDiversity">0/100</b></div><div style="display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding-bottom:4px;"><span style="color:#555;">Net Worth:</span><b id="breakdownProfit">0/100</b></div></div><div style="height:200px;margin-bottom:8px;"><canvas id="comparisonChart"></canvas></div><button onclick="finishAndSubmit(this)" style="background:var(--primary);color:#fff;padding:10px 20px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px;">⏳ Submit your results here</button></div></div>
+  <div id="txModal" class="modal-overlay"><div class="modal-box" style="max-width:500px;text-align:left;"><span class="close-btn" onclick="toggleModal('txModal',false)">&times;</span><h2 style="color:var(--primary);margin:0 0 10px 0;font-size:18px;">Transaction History</h2><div id="tx-modal-holdings" style="margin-bottom:12px;"></div><h3 style="font-size:14px;margin:0 0 8px 0;color:#555;">Recent Trades</h3><div id="tx-modal-list" style="max-height:300px;overflow-y:auto;"></div></div></div>
+
+  <div class="container">
+    <header id="headerPanel">
+      <div><h2 style="margin:0;font-size:16px;">&#128200; Investify <button class="btn-tut" onclick="startTutorial()"> 👆 Click here for tutorial</button></h2></div>
+      <div style="display:flex;align-items:flex-end;">
+        <div class="stat-box"><div class="stat-label">Cash</div><div class="stat-value" id="cashDisplay">$10,000</div></div>
+        <div class="stat-box"><div class="stat-label">Net Worth</div><div class="stat-value" id="netWorthDisplay">$10,000</div></div>
+        <div class="stat-box"><div class="stat-label">Return</div><div class="stat-value" id="gainDisplay">0.0%</div></div>
+        <div class="stat-box"><div class="stat-label">Year</div><div class="stat-value" id="timeDisplay">0 / 20</div></div>
+      </div>
+    </header>
+
+    <nav id="leftPanel">
+      <div class="panel" id="sectorstrategy" style="flex:0 0 auto;display:flex;flex-direction:column;min-height:0;">
+        <div class="portfolio-header"><h4 style="margin:0;font-size:13px;font-weight:700;">Portfolio</h4><div class="portfolio-tabs"><button class="portfolio-tab" id="tabAssetClass" onclick="switchDonutTab('asset')">Asset Class</button><button class="portfolio-tab portfolio-tab--active" id="tabSectors" onclick="switchDonutTab('sector')">Sectors</button></div></div>
+        <div style="flex:1 1 auto;min-height:90px;max-height:14vh;margin:2px 0;"><canvas id="allocationChart"></canvas></div>
+        <div style="flex:0 0 auto;"><div style="display:flex;justify-content:space-between;font-size:10px;color:#777;"><span id="diversityLabel">Sector Diversity:</span><span id="diversityText" style="font-weight:bold;">None</span></div><div class="div-meter-bg"><div id="diversityBar" class="div-meter-fill" style="background:#ccc;"></div></div></div>
+      </div>
+
+      <div class="panel" id="scorecard" style="flex:0 0 auto;display:flex;flex-direction:column;">
+        <h4 style="margin:0 0 3px 0;font-size:13px;font-weight:700;padding-bottom:3px;border-bottom:1px solid #eee;flex:0 0 auto;">Performance</h4>
+        <div id="score-container" style="font-size:10px;flex:0 0 auto;"><p style="color:#777;padding:2px;">Awaiting action...</p></div>
+      </div>
+
+      <div class="panel" id="newsPanel" style="flex:1.4 1 0;min-height:0;display:flex;flex-direction:column;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;"><h4 style="margin:0;font-size:13px;font-weight:700;">Market News</h4><button class="btn-tx-history" id="newsReadMoreBtn" onclick="showPastNewsModal()">Past News</button></div>
+        <div id="news-history-container" style="font-size:12px;flex:1 1 auto;overflow-y:auto;min-height:0;margin-top:3px;"><p style="color:#999;font-style:italic;text-align:center;margin-top:6px;">Awaiting Year 1...</p></div>
+      </div>
+
+      <div class="panel" id="holdingsPanel" style="flex:0 0 auto;">
+        <div id="holdings-bar" class="holdings-bar" onclick="showHoldingsModal()">
+          <span style="font-weight:700;">📋 My Holdings: <span class="holdings-bar__count" id="holdingsCount">0 assets</span></span>
+          <span class="holdings-bar__value" id="holdingsValue" style="text-align:center;">$0</span>
+          <span class="holdings-bar__arrow">▸</span>
+        </div>
+      </div>
+
+      <div class="panel" id="pendingPanel" style="flex:1 1 0;min-height:0;display:flex;flex-direction:column;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;">
+          <h4 style="margin:0;font-size:13px;font-weight:700;">This Year's Trades</h4>
+          <div style="display:flex;gap:4px;align-items:center;">
+            <span id="pending-net" style="font-size:13px;font-weight:800;color:#2c3e50;"></span>
+            <button class="btn-tx-history" onclick="showTransactionsModal()">📋 History</button>
+          </div>
+        </div>
+        <div id="pending-container" style="font-size:11px;margin-top:3px;overflow-y:auto;flex:1 1 auto;min-height:0;"><div class="holdings-empty">No trades this year yet.</div></div>
+      </div>
+    </nav>
+
+    <main>
+      <div class="panel" id="chartPanel" style="display:none;"><div style="height:300px;"><canvas id="marketChart"></canvas></div><button id="btnNext" class="btn-next" onclick="nextYear()">Advance 1 Year</button></div>
+      <div class="panel" id="marketPanel" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+        <div class="market-grid" id="marketGrid" style="flex:1;overflow-y:auto;padding-right:5px;"></div>
+        <div style="flex:0 0 auto;padding:6px 0 2px 0;">
+          <button id="advanceBtn" class="btn-advance" onclick="nextYear()" style="font-size:14px;padding:12px;box-shadow:0 4px 12px rgba(39,174,96,0.3);">
+            Confirm Order &amp; Advance 1 Year &#9654;
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+</body>
+</html>
