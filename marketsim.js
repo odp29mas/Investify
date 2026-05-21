@@ -115,9 +115,9 @@ let state = {
 // Timing + Sheets-export config (used by Section 20 below; declared here so simStartTime is in
 // scope when startSimulation() writes to it).
 let simStartTime = null;
-const APPS_SCRIPT_URL   = 'https://script.google.com/macros/s/AKfycbzaFEM6k-hwrBqt2oXBuentYFOsdYjZ1QNqPWrnsRM9UAAdnmjLq81p5dzpK1uqqprc/exec';
+const APPS_SCRIPT_URL   = ''; // to fill with App Script URL. It should end with /exec 
 const SURVEY_REDIRECT_URL = 'https://www.moneysense.gov.sg/'; 
-const STUDY_TOKEN       = 'moneysenseGIP2026!'; // a secret token to prevent unauthorized submissions to the Google Sheet. Must match the token in the Apps Script.
+const STUDY_TOKEN       = ''; // a secret token to prevent unauthorized submissions to the Google Sheet. Must match the token in the Apps Script.
 
 
 /* ════════════════════════════════════════════════════════════════════════════════════════════════
